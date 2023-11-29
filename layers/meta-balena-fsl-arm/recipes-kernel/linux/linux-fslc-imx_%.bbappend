@@ -8,7 +8,7 @@ SCMVERSION:imx8mm-lpddr4-evk ="n"
 SRC_URI:append:imx8mm-lpddr4-evk = " \
 	file://0001-disable-audio-codecs.patch \
         file://0002-disable-caam-jr2.patch \
-        file://0004-disable-usb1-setup.patch \
+        file://0005-support-single-usb-c.patch \
         file://enable-iwlwifi.cfg \
         file://extra-kernel.cfg \
 "

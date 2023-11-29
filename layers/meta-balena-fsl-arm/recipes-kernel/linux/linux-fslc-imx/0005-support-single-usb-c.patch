@@ -1,0 +1,89 @@
+diff -ur kernel-source.org/drivers/usb/typec/tcpm/tcpci.c kernel-source/drivers/usb/typec/tcpm/tcpci.c
+--- kernel-source.org/drivers/usb/typec/tcpm/tcpci.c	2023-11-29 14:18:45.332795261 +0000
++++ kernel-source/drivers/usb/typec/tcpm/tcpci.c	2023-11-29 15:18:23.644323338 +0000
+@@ -381,6 +381,7 @@
+ static int tcpci_set_vbus(struct tcpc_dev *tcpc, bool source, bool sink)
+ {
+ 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
++        unsigned int reg;
+ 	int ret;
+ 
+ 	if (tcpci->data->set_vbus) {
+@@ -390,16 +391,20 @@
+ 			return ret < 0 ? ret : 0;
+ 	}
+ 
++        ret = regmap_read(tcpci->regmap, TCPC_POWER_STATUS, &reg);
++        if (ret < 0)
++        	return ret;
++
+ 	/* Disable both source and sink first before enabling anything */
+ 
+-	if (!source) {
++	if (!source && (reg & TCPC_POWER_STATUS_SOURCING_VBUS)) {
+ 		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
+ 				   TCPC_CMD_DISABLE_SRC_VBUS);
+ 		if (ret < 0)
+ 			return ret;
+ 	}
+ 
+-	if (!sink) {
++	if (!sink && (reg & TCPC_POWER_STATUS_SINKING_VBUS)) {
+ 		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
+ 				   TCPC_CMD_DISABLE_SINK_VBUS);
+ 		if (ret < 0)
+diff -ur kernel-source.org/drivers/usb/typec/tcpm/tcpci.h kernel-source/drivers/usb/typec/tcpm/tcpci.h
+--- kernel-source.org/drivers/usb/typec/tcpm/tcpci.h	2023-11-29 14:18:45.332795261 +0000
++++ kernel-source/drivers/usb/typec/tcpm/tcpci.h	2023-11-29 15:28:08.752009059 +0000
+@@ -84,6 +84,7 @@
+ #define TCPC_POWER_STATUS_SOURCING_VBUS	BIT(4)
+ #define TCPC_POWER_STATUS_VBUS_DET	BIT(3)
+ #define TCPC_POWER_STATUS_VBUS_PRES	BIT(2)
++#define TCPC_POWER_STATUS_SINKING_VBUS	BIT(0)
+ 
+ #define TCPC_FAULT_STATUS		0x1f
+ 
+diff -ur kernel-source.org/drivers/usb/typec/tcpm/tcpm.c kernel-source/drivers/usb/typec/tcpm/tcpm.c
+--- kernel-source.org/drivers/usb/typec/tcpm/tcpm.c	2023-11-29 14:18:45.332795261 +0000
++++ kernel-source/drivers/usb/typec/tcpm/tcpm.c	2023-11-29 15:18:23.644323338 +0000
+@@ -274,6 +274,7 @@
+ 	bool connected;
+ 	enum typec_port_type port_type;
+ 	bool vbus_present;
++        bool vbus_keep;
+ 	bool vbus_never_low;
+ 	bool vbus_source;
+ 	bool vbus_charge;
+@@ -2889,7 +2890,8 @@
+ 	port->rx_msgid = -1;
+ 
+ 	port->tcpc->set_pd_rx(port->tcpc, false);
+-	tcpm_init_vbus(port);	/* also disables charging */
++	if (!port->vbus_keep)
++              tcpm_init_vbus(port);  /* also disables charging */
+ 	tcpm_init_vconn(port);
+ 	tcpm_set_current_limit(port, 0, 0);
+ 	tcpm_set_polarity(port, TYPEC_POLARITY_CC1);
+@@ -4690,6 +4692,10 @@
+ 
+ 	port->tcpc->init(port->tcpc);
+ 
++        port->vbus_present = port->tcpc->get_vbus(port->tcpc);
++        if (port->vbus_present)
++              port->vbus_keep = true;
++
+ 	tcpm_reset_port(port);
+ 
+ 	/*
+@@ -4711,6 +4717,11 @@
+ 	 * otherwise. So do not try to be fancy and force a clean disconnect.
+ 	 */
+ 	tcpm_set_state(port, PORT_RESET, 0);
++
++        if (!port->vbus_keep)
++             tcpm_set_state(port, PORT_RESET, 0);
++
++        port->vbus_keep = false;
+ }
+ 
+ static int tcpm_port_type_set(struct typec_port *p, enum typec_port_type type)
